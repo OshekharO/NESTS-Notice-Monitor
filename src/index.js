@@ -1,3 +1,5 @@
+import * as cheerio from "cheerio";
+
 const NESTS_URL =
   "https://nests.tribal.gov.in/show_content.php?lang=1&level=0&ls_id=15&lid=13";
 
@@ -8,33 +10,81 @@ const TIME_ZONE = "Asia/Kolkata";
 
 
 /**
- * Get today's date in the same format used by NESTS.
+ * Get today's date exactly in the format
+ * used by the NESTS website.
  *
  * Example:
  * 09 Sep 2026
  */
 function getToday() {
-  return new Intl.DateTimeFormat("en-GB", {
+  const now = new Date();
+
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: TIME_ZONE,
-    day: "2-digit",
-    month: "short",
     year: "numeric",
-  }).format(new Date());
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(now);
+
+  const year = parts.find(
+    p => p.type === "year"
+  ).value;
+
+  const month = parts.find(
+    p => p.type === "month"
+  ).value;
+
+  const day = parts.find(
+    p => p.type === "day"
+  ).value;
+
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec"
+  ];
+
+  return `${day} ${months[Number(month) - 1]} ${year}`;
 }
 
 
 /**
- * Fetch the NESTS page.
+ * Clean whitespace.
  */
-async function fetchNestsPage() {
+function cleanText(value) {
+  return String(value || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+
+/**
+ * Fetch NESTS website.
+ */
+async function fetchNests() {
   const response = await fetch(NESTS_URL, {
     method: "GET",
+
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140 Safari/537.36",
+
       "Accept":
         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    },
+
+      "Accept-Language":
+        "en-US,en;q=0.9"
+    }
   });
 
   if (!response.ok) {
@@ -48,174 +98,231 @@ async function fetchNestsPage() {
 
 
 /**
- * Decode common HTML entities.
- */
-function decodeHtmlEntities(text) {
-  return text
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">");
-}
-
-
-/**
- * Clean whitespace from scraped text.
- */
-function cleanText(text) {
-  return decodeHtmlEntities(text)
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-
-/**
- * Extract today's notices from the HTML.
- *
- * We don't use a browser here because the NESTS page
- * contains normal HTML tables.
+ * Find all notices whose date is today.
  */
 function extractTodaysNotices(html, today) {
+  const $ = cheerio.load(html);
+
   const notices = [];
 
-  // Find table rows.
-  const rows = html.match(/<tr\b[\s\S]*?<\/tr>/gi) || [];
+  $("tr").each((index, element) => {
 
-  for (const row of rows) {
-    // Extract TD cells.
-    const cells = row.match(/<td\b[\s\S]*?<\/td>/gi) || [];
+    const row = $(element);
+
+    const cells = row.find("td");
 
     if (cells.length === 0) {
-      continue;
+      return;
     }
 
-    // Date is normally the last TD.
-    const lastCell = cells[cells.length - 1];
 
+    /*
+     * NESTS puts the notice date
+     * in the last <td>.
+     */
     const date = cleanText(
-      lastCell.replace(/<[^>]*>/g, " ")
+      cells.last().text()
     );
 
-    // Only process today's rows.
+
+    console.log(
+      `Row ${index}: date="${date}"`
+    );
+
+
+    /*
+     * Compare against today's date.
+     */
     if (date !== today) {
-      continue;
+      return;
     }
 
-    // Find first anchor.
-    const anchorMatch = row.match(
-      /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i
-    );
 
-    if (!anchorMatch) {
-      continue;
+    /*
+     * Find first anchor.
+     */
+    const linkElement =
+      row.find("a").first();
+
+
+    if (!linkElement.length) {
+      return;
     }
 
-    const href = decodeHtmlEntities(anchorMatch[1]);
 
+    /*
+     * Extract title.
+     *
+     * This will automatically remove
+     * the <img src="new.gif"> text because
+     * .text() only gets actual text.
+     */
     const title = cleanText(
-      anchorMatch[2].replace(/<[^>]*>/g, " ")
+      linkElement.text()
     );
+
+
+    /*
+     * Extract href.
+     */
+    const href = cleanText(
+      linkElement.attr("href")
+    );
+
 
     if (!title || !href) {
-      continue;
+      return;
     }
 
-    // Convert relative URL into absolute URL.
-    let absoluteUrl;
+
+    /*
+     * Convert relative URL to absolute URL.
+     */
+    let url;
 
     try {
-      absoluteUrl = new URL(href, NESTS_URL).href;
-    } catch {
-      continue;
+
+      url = new URL(
+        href,
+        NESTS_URL
+      ).href;
+
+    } catch (error) {
+
+      console.error(
+        `Invalid URL: ${href}`
+      );
+
+      return;
     }
+
 
     notices.push({
       title,
-      url: absoluteUrl,
-      date,
+      url,
+      date
     });
-  }
+  });
 
-  // Remove duplicates.
+
+  /*
+   * Remove duplicate URLs.
+   */
   const unique = [];
+
   const seen = new Set();
 
   for (const notice of notices) {
-    if (!seen.has(notice.url)) {
-      seen.add(notice.url);
-      unique.push(notice);
+
+    if (seen.has(notice.url)) {
+      continue;
     }
+
+    seen.add(notice.url);
+
+    unique.push(notice);
   }
+
 
   return unique;
 }
 
 
 /**
- * Check whether this notice was already sent.
+ * Check if notice has already
+ * been sent.
  */
-async function wasAlreadySent(env, url) {
+async function isAlreadySent(env, url) {
+
   const result = await env.DB
-    .prepare(
-      "SELECT id FROM notices WHERE url = ? LIMIT 1"
-    )
+    .prepare(`
+      SELECT id
+      FROM notices
+      WHERE url = ?
+      LIMIT 1
+    `)
     .bind(url)
     .first();
 
-  return !!result;
+  return Boolean(result);
 }
 
 
 /**
- * Send notification through your Cloudflare contact endpoint.
+ * Send notification.
  */
 async function sendNotification(notice) {
+
   const message = [
     "🚨 New NESTS Notice",
     "",
     `📌 ${notice.title}`,
     `📅 ${notice.date}`,
     "",
-    `🔗 ${notice.url}`,
+    `🔗 ${notice.url}`
   ].join("\n");
 
-  const response = await fetch(NOTIFY_URL, {
-    method: "POST",
 
-    headers: {
-      "Content-Type": "application/json",
-    },
+  console.log(
+    "Sending notification..."
+  );
 
-    body: JSON.stringify({
-      name: "NESTS Notice Monitor",
-      email: "nests-monitor@example.com",
-      subject: `New NESTS Notice: ${notice.title}`,
-      message,
-    }),
-  });
+
+  const response = await fetch(
+    NOTIFY_URL,
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json"
+      },
+
+      body: JSON.stringify({
+        name:
+          "NESTS Notice Monitor",
+
+        email:
+          "nests-monitor@example.com",
+
+        subject:
+          `New NESTS Notice: ${notice.title}`,
+
+        message
+      })
+    }
+  );
+
 
   if (!response.ok) {
-    const body = await response.text();
+
+    const body =
+      await response.text();
 
     throw new Error(
       `Notification endpoint returned HTTP ${response.status}: ${body}`
     );
   }
 
-  return true;
+
+  console.log(
+    "✅ Notification endpoint succeeded"
+  );
 }
 
 
 /**
- * Save successfully-notified notice in D1.
+ * Save notice to D1.
  */
 async function saveNotice(env, notice) {
+
   await env.DB
     .prepare(`
       INSERT INTO notices
-        (title, url, notice_date)
+        (
+          title,
+          url,
+          notice_date
+        )
       VALUES
         (?, ?, ?)
     `)
@@ -229,129 +336,272 @@ async function saveNotice(env, notice) {
 
 
 /**
- * Main monitor.
+ * Main checker.
  */
 async function checkNests(env) {
+
   const today = getToday();
 
-  console.log(`Checking NESTS for: ${today}`);
 
-  const html = await fetchNestsPage();
-
-  const notices = extractTodaysNotices(
-    html,
-    today
+  console.log(
+    "================================"
   );
 
   console.log(
-    `Found ${notices.length} notice(s) dated ${today}`
+    `NESTS CHECK: ${today}`
   );
 
-  let newCount = 0;
+  console.log(
+    "================================"
+  );
 
+
+  /*
+   * Download page.
+   */
+  const html =
+    await fetchNests();
+
+
+  console.log(
+    `Downloaded ${html.length} bytes`
+  );
+
+
+  /*
+   * Extract today's notices.
+   */
+  const notices =
+    extractTodaysNotices(
+      html,
+      today
+    );
+
+
+  console.log(
+    `Found ${notices.length} notice(s) for ${today}`
+  );
+
+
+  let sent = 0;
+  let skipped = 0;
+  let failed = 0;
+
+
+  /*
+   * Process notices.
+   */
   for (const notice of notices) {
+
+    console.log("");
     console.log(
-      `Found: ${notice.title} -> ${notice.url}`
+      `Title: ${notice.title}`
     );
 
-    const alreadySent = await wasAlreadySent(
-      env,
-      notice.url
+    console.log(
+      `URL: ${notice.url}`
     );
+
+
+    /*
+     * Check D1.
+     */
+    const alreadySent =
+      await isAlreadySent(
+        env,
+        notice.url
+      );
+
 
     if (alreadySent) {
+
       console.log(
-        `Already notified: ${notice.url}`
+        "⏭️ Already sent - skipping"
       );
+
+      skipped++;
 
       continue;
     }
 
+
+    /*
+     * New notice.
+     */
     try {
-      // Send first.
-      await sendNotification(notice);
 
-      // Save only after notification succeeds.
-      await saveNotice(env, notice);
+      await sendNotification(
+        notice
+      );
 
-      newCount++;
+
+      /*
+       * Save only after notification
+       * succeeds.
+       */
+      await saveNotice(
+        env,
+        notice
+      );
+
 
       console.log(
-        `✅ Notification sent and saved: ${notice.title}`
+        "✅ Notice saved to D1"
       );
+
+
+      sent++;
+
     } catch (error) {
+
       console.error(
-        `❌ Failed to process notice: ${notice.title}`,
+        "❌ Failed to notify:",
         error
       );
+
+      failed++;
     }
   }
 
+
+  const result = {
+    success: true,
+
+    today,
+
+    found:
+      notices.length,
+
+    sent,
+
+    skipped,
+
+    failed
+  };
+
+
   console.log(
-    `Finished. New notifications: ${newCount}`
+    JSON.stringify(result)
   );
 
-  return {
-    today,
-    found: notices.length,
-    newNotifications: newCount,
-  };
+
+  return result;
 }
 
 
 /**
- * HTTP endpoint.
- *
- * Visiting:
- *
- * /check
- *
- * manually runs the scraper.
+ * Cloudflare Worker.
  */
 export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
 
+  /**
+   * HTTP requests.
+   */
+  async fetch(
+    request,
+    env,
+    ctx
+  ) {
+
+    const url =
+      new URL(request.url);
+
+
+    /*
+     * Manual check.
+     */
     if (url.pathname === "/check") {
-      try {
-        const result = await checkNests(env);
 
-        return Response.json({
-          success: true,
-          ...result,
-        });
+      try {
+
+        const result =
+          await checkNests(env);
+
+
+        return Response.json(
+          result
+        );
+
       } catch (error) {
-        console.error(error);
+
+        console.error(
+          "Check failed:",
+          error
+        );
+
 
         return Response.json(
           {
             success: false,
-            error: error.message,
+
+            error:
+              error instanceof Error
+                ? error.message
+                : String(error)
           },
+
           {
-            status: 500,
+            status: 500
           }
         );
       }
     }
 
+
+    /*
+     * Health check.
+     */
+    if (url.pathname === "/") {
+
+      return Response.json({
+        service:
+          "NESTS Notice Monitor",
+
+        status:
+          "running",
+
+        timezone:
+          TIME_ZONE,
+
+        today:
+          getToday(),
+
+        source:
+          NESTS_URL,
+
+        cron:
+          "Every 5 minutes"
+      });
+    }
+
+
     return new Response(
-      "NESTS Monitor is running.\n\nUse /check to manually run a check.",
+      "Not Found",
       {
-        headers: {
-          "Content-Type": "text/plain",
-        },
+        status: 404
       }
     );
   },
 
 
   /**
-   * Cloudflare Cron Trigger.
+   * Cron Trigger.
    */
-  async scheduled(event, env, ctx) {
+  async scheduled(
+    event,
+    env,
+    ctx
+  ) {
+
     ctx.waitUntil(
       checkNests(env)
+        .catch(error => {
+          console.error(
+            "Scheduled check failed:",
+            error
+          );
+        })
     );
-  },
+  }
+
 };
