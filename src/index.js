@@ -178,24 +178,33 @@ function extractTodaysNotices(html, today) {
 
 
 /* =========================================================
-   D1 - CHECK WHETHER NOTICE WAS ALREADY SENT
+   D1 - CHECK WHICH NOTICES WERE ALREADY SENT (BATCHED)
+   =========================================================
+   ⚡ Bolt Optimization: Batch D1 database lookup into a single query
+   instead of running N queries in a loop. Reduces database latency
+   from O(N) round-trips to O(1) round-trip.
    ========================================================= */
 
-async function isAlreadySent(env, url) {
-  const result =
+async function getAlreadySentUrls(env, urls) {
+  if (!urls || urls.length === 0) {
+    return new Set();
+  }
+
+  const placeholders = urls.map(() => "?").join(",");
+
+  const { results } =
     await env.DB
       .prepare(
         `
-        SELECT id
+        SELECT url
         FROM notices
-        WHERE url = ?
-        LIMIT 1
+        WHERE url IN (${placeholders})
         `
       )
-      .bind(url)
-      .first();
+      .bind(...urls)
+      .all();
 
-  return Boolean(result);
+  return new Set((results || []).map((row) => row.url));
 }
 
 
@@ -364,6 +373,19 @@ async function checkNests(env) {
 
 
   /*
+   * Batch check D1 for all extracted notice URLs in a single query.
+   */
+  const candidateUrls =
+    notices.map((n) => n.url);
+
+  const alreadySentUrls =
+    await getAlreadySentUrls(
+      env,
+      candidateUrls
+    );
+
+
+  /*
    * Process each notice.
    */
   for (
@@ -372,13 +394,10 @@ async function checkNests(env) {
   ) {
 
     /*
-     * Check D1.
+     * Check D1 using pre-fetched Set.
      */
     const alreadySent =
-      await isAlreadySent(
-        env,
-        notice.url
-      );
+      alreadySentUrls.has(notice.url);
 
 
     if (alreadySent) {
