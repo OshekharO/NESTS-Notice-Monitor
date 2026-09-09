@@ -1,19 +1,21 @@
 # NESTS-Notice-Monitor
 
-A Cloudflare Worker that monitors the [NESTS (National Entrance Screening Test)](https://nests.tribal.gov.in/) website for new notices and sends real-time notifications via Telegram.
+A Cloudflare Worker that monitors the official [NESTS](https://nests.tribal.gov.in/) website for new notices related to **NESTS** and **EMRS** (Eklavya Model Residential Schools), and sends real‑time alerts via Telegram.
 
 ## Overview
 
-NESTS-Notice-Monitor is a serverless application that periodically scrapes the official NESTS notice board, extracts notices published on the current day, and sends notifications via Telegram. It uses Cloudflare Workers for serverless execution, D1 for state management, Cheerio for HTML parsing, and **Telegram-Form-Worker** as the notification backend.
+NESTS-Notice-Monitor is a serverless application that periodically scrapes the NESTS notice board, extracts notices published on the current day, and sends notifications through Telegram. It uses Cloudflare Workers for serverless execution, D1 for state management, Cheerio for HTML parsing, and the companion [Telegram-Form-Worker](https://github.com/OshekharO/Telegram-Form-Worker) as the notification backend.
+
+> **Note:** The official NESTS portal (`nests.tribal.gov.in`) publishes all announcements, including those for EMRS (Eklavya Model Residential Schools) admissions, results, and other important updates.
 
 ## Features
 
-- **Automated Monitoring**: Checks the NESTS website every 5 minutes for new notices
-- **Smart Deduplication**: Tracks already-sent notices using Cloudflare D1 to prevent duplicate notifications
-- **Real-time Telegram Notifications**: Sends alerts through the companion [Telegram-Form-Worker](https://github.com/OshekharO/Telegram-Form-Worker) via Cloudflare Service Binding
-- **Simple API**: Provides endpoints to check the service status and manually trigger a check
-- **Serverless**: Runs on Cloudflare Workers with zero infrastructure management
-- **Time Zone Aware**: Uses IST (Asia/Kolkata) for date comparisons
+- **Automated Monitoring**: Checks the NESTS notice page every 5 minutes for new notice.
+- **Smart Deduplication**: Tracks already‑sent notices using Cloudflare D1 to prevent duplicates.
+- **Real‑time Telegram Alerts**: Sends notifications via the companion Telegram‑Form‑Worker (service binding).
+- **Simple API**: Provides status and manual trigger endpoints.
+- **Serverless**: Runs on Cloudflare Workers – no infrastructure to manage.
+- **Time Zone Aware**: Uses IST (Asia/Kolkata) for accurate date comparisons.
 
 ## Tech Stack
 
@@ -26,13 +28,14 @@ NESTS-Notice-Monitor is a serverless application that periodically scrapes the o
 
 ## How It Works
 
-1. The Worker runs on a scheduled cron trigger (`*/5 * * * *`)
-2. It fetches the NESTS notice page: `https://nests.tribal.gov.in/show_content.php?lang=1&level=0&ls_id=15&lid=13`
-3. Using Cheerio, it parses the HTML and extracts notices with today's date
-4. For each notice, it checks D1 to see if it has already been sent
-5. If not sent, it sends a notification through the **Telegram-Form-Worker** service binding (`env.CONTACT.fetch()`)
-6. On successful notification, it saves the notice to D1
-7. Failed notifications are retried on the next cron run
+1. The Worker runs on a scheduled cron trigger (`*/5 * * * *`).
+2. It fetches the NESTS notice page:  
+   `https://nests.tribal.gov.in/show_content.php?lang=1&level=0&ls_id=15&lid=13`
+3. Using Cheerio, it parses the HTML and extracts notices with **today's date**.
+4. For each notice, it checks D1 to see if it has already been sent.
+5. If not sent, it dispatches a notification through the Telegram‑Form‑Worker service binding (`env.CONTACT.fetch()`).
+6. On success, it records the notice in D1.
+7. Failed notifications are retried on the next cron run.
 
 ## Prerequisites
 
@@ -56,9 +59,9 @@ cd NESTS-Notice-Monitor
 npm install
 ```
 
-### 3. Deploy the Telegram-Form-Worker (Notification Backend)
+### 3. Deploy the Telegram‑Form‑Worker (Notification Backend)
 
-This monitor relies on [Telegram-Form-Worker](https://github.com/OshekharO/Telegram-Form-Worker) to send notifications. You need to deploy it first:
+This monitor relies on [Telegram-Form-Worker](https://github.com/OshekharO/Telegram-Form-Worker) to send Telegram messages. Deploy it first:
 
 ```bash
 git clone https://github.com/OshekharO/Telegram-Form-Worker.git
@@ -76,7 +79,7 @@ wrangler secret put CHAT_ID      # Your Telegram Chat ID
 
 ### 4. Configure the Service Binding
 
-In `wrangler.jsonc` of NESTS-Notice-Monitor, add a service binding pointing to your deployed Telegram-Form-Worker:
+In `wrangler.jsonc` of NESTS-Notice-Monitor, add a service binding pointing to your deployed Telegram‑Form‑Worker:
 
 ```json
 {
@@ -125,14 +128,14 @@ This runs `wrangler deploy` as defined in `package.json`.
 
 ## Notification Payload
 
-The monitor sends notifications to Telegram-Form-Worker using the following JSON structure (compatible with the `/f/contact` endpoint):
+The monitor sends notifications to Telegram‑Form‑Worker using this JSON structure (compatible with the `/f/contact` endpoint):
 
 ```json
 {
     "name": "NESTS Notice Monitor",
     "email": "test@example.com",
-    "subject": "New NESTS Notice: {notice title}",
-    "message": "New NESTS Notice\n\n{notice title}\n{notice date}\n\n{notice url}"
+    "subject": "New NESTS/EMRS Notice: {notice title}",
+    "message": "New NESTS/EMRS Notice\n\n{notice title}\n{notice date}\n\n{notice url}"
 }
 ```
 
@@ -192,12 +195,12 @@ Manually triggers the monitoring process. Returns a summary of the check:
 | `main` | Entry point file |
 | `compatibility_date` | Cloudflare compatibility date |
 | `d1_databases` | D1 database binding configuration |
-| `services` | Service binding to Telegram-Form-Worker (binding name: `CONTACT`) |
+| `services` | Service binding to Telegram‑Form‑Worker (binding name: `CONTACT`) |
 | `triggers.crons` | Cron schedule (every 5 minutes) |
 
-### Environment Variables (for Telegram-Form-Worker)
+### Environment Variables (for Telegram‑Form‑Worker)
 
-These are set in the Telegram-Form-Worker deployment:
+These are set in the Telegram‑Form‑Worker deployment:
 
 | Variable | Description |
 |----------|-------------|
@@ -217,11 +220,11 @@ These are set in the Telegram-Form-Worker deployment:
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | INTEGER | Primary key (auto-increment) |
+| `id` | INTEGER | Primary key (auto‑increment) |
 | `title` | TEXT | Notice title |
 | `url` | TEXT | Unique notice URL |
 | `notice_date` | TEXT | Notice publication date |
-| `created_at` | DATETIME | Timestamp of when the record was created |
+| `created_at` | DATETIME | Timestamp when the record was created |
 
 ## Development
 
