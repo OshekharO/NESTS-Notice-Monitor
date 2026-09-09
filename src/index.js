@@ -10,7 +10,7 @@ const TIME_ZONE = "Asia/Kolkata";
 
 
 /**
- * Get today's date exactly in the format
+ * Get today's date in the exact format
  * used by the NESTS website.
  *
  * Example:
@@ -27,15 +27,15 @@ function getToday() {
   }).formatToParts(now);
 
   const year = parts.find(
-    p => p.type === "year"
+    (part) => part.type === "year"
   ).value;
 
   const month = parts.find(
-    p => p.type === "month"
+    (part) => part.type === "month"
   ).value;
 
   const day = parts.find(
-    p => p.type === "day"
+    (part) => part.type === "day"
   ).value;
 
   const months = [
@@ -58,7 +58,7 @@ function getToday() {
 
 
 /**
- * Clean whitespace.
+ * Clean whitespace from scraped text.
  */
 function cleanText(value) {
   return String(value || "")
@@ -69,9 +69,11 @@ function cleanText(value) {
 
 
 /**
- * Fetch NESTS website.
+ * Fetch NESTS page.
  */
 async function fetchNests() {
+  console.log("Fetching NESTS...");
+
   const response = await fetch(NESTS_URL, {
     method: "GET",
 
@@ -93,20 +95,29 @@ async function fetchNests() {
     );
   }
 
-  return await response.text();
+  const html = await response.text();
+
+  console.log(
+    `NESTS response received: ${html.length} bytes`
+  );
+
+  return html;
 }
 
 
 /**
- * Find all notices whose date is today.
+ * Extract notices whose date equals today.
  */
 function extractTodaysNotices(html, today) {
   const $ = cheerio.load(html);
 
   const notices = [];
 
-  $("tr").each((index, element) => {
+  console.log(
+    `Looking for notices dated: ${today}`
+  );
 
+  $("tr").each((index, element) => {
     const row = $(element);
 
     const cells = row.find("td");
@@ -115,93 +126,91 @@ function extractTodaysNotices(html, today) {
       return;
     }
 
-
     /*
-     * NESTS puts the notice date
-     * in the last <td>.
+     * Date is the last <td>.
      */
     const date = cleanText(
       cells.last().text()
     );
 
-
+    /*
+     * Log rows for debugging.
+     */
     console.log(
-      `Row ${index}: date="${date}"`
+      `Row ${index}: ${date}`
     );
 
-
     /*
-     * Compare against today's date.
+     * Only today's date.
      */
     if (date !== today) {
       return;
     }
 
-
     /*
-     * Find first anchor.
+     * Find first link.
      */
-    const linkElement =
-      row.find("a").first();
+    const link = row.find("a").first();
 
-
-    if (!linkElement.length) {
-      return;
-    }
-
-
-    /*
-     * Extract title.
-     *
-     * This will automatically remove
-     * the <img src="new.gif"> text because
-     * .text() only gets actual text.
-     */
-    const title = cleanText(
-      linkElement.text()
-    );
-
-
-    /*
-     * Extract href.
-     */
-    const href = cleanText(
-      linkElement.attr("href")
-    );
-
-
-    if (!title || !href) {
-      return;
-    }
-
-
-    /*
-     * Convert relative URL to absolute URL.
-     */
-    let url;
-
-    try {
-
-      url = new URL(
-        href,
-        NESTS_URL
-      ).href;
-
-    } catch (error) {
-
-      console.error(
-        `Invalid URL: ${href}`
+    if (!link.length) {
+      console.log(
+        `Today's row has no link: row ${index}`
       );
 
       return;
     }
 
+    /*
+     * Extract title.
+     */
+    const title = cleanText(
+      link.text()
+    );
+
+    /*
+     * Extract href.
+     */
+    const href = cleanText(
+      link.attr("href")
+    );
+
+    if (!title || !href) {
+      console.log(
+        `Today's row has incomplete data: row ${index}`
+      );
+
+      return;
+    }
+
+    /*
+     * Convert relative URL to absolute URL.
+     *
+     * Example:
+     *
+     * showfile.php?lang=1...
+     *
+     * becomes:
+     *
+     * https://nests.tribal.gov.in/showfile.php?lang=1...
+     */
+    const url = new URL(
+      href,
+      NESTS_URL
+    ).href;
 
     notices.push({
       title,
       url,
       date
     });
+
+    console.log(
+      `FOUND: ${title}`
+    );
+
+    console.log(
+      `URL: ${url}`
+    );
   });
 
 
@@ -213,7 +222,6 @@ function extractTodaysNotices(html, today) {
   const seen = new Set();
 
   for (const notice of notices) {
-
     if (seen.has(notice.url)) {
       continue;
     }
@@ -223,17 +231,15 @@ function extractTodaysNotices(html, today) {
     unique.push(notice);
   }
 
-
   return unique;
 }
 
 
 /**
- * Check if notice has already
- * been sent.
+ * Check D1 to see whether
+ * this notice was already sent.
  */
 async function isAlreadySent(env, url) {
-
   const result = await env.DB
     .prepare(`
       SELECT id
@@ -249,10 +255,9 @@ async function isAlreadySent(env, url) {
 
 
 /**
- * Send notification.
+ * Send notification to your contact endpoint.
  */
 async function sendNotification(notice) {
-
   const message = [
     "🚨 New NESTS Notice",
     "",
@@ -263,8 +268,28 @@ async function sendNotification(notice) {
   ].join("\n");
 
 
+  const payload = {
+    name: "NESTS Notice Monitor",
+
+    email: "nests-monitor@example.com",
+
+    subject:
+      `New NESTS Notice: ${notice.title}`,
+
+    message
+  };
+
+
+  console.log(
+    "--------------------------------"
+  );
+
   console.log(
     "Sending notification..."
+  );
+
+  console.log(
+    JSON.stringify(payload)
   );
 
 
@@ -274,47 +299,55 @@ async function sendNotification(notice) {
       method: "POST",
 
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Accept": "application/json"
       },
 
-      body: JSON.stringify({
-        name:
-          "NESTS Notice Monitor",
-
-        email:
-          "nests-monitor@example.com",
-
-        subject:
-          `New NESTS Notice: ${notice.title}`,
-
-        message
-      })
+      body: JSON.stringify(payload)
     }
   );
 
 
+  /*
+   * Always read the response body.
+   * This is important for debugging.
+   */
+  const responseText =
+    await response.text();
+
+
+  console.log(
+    `Notification HTTP status: ${response.status}`
+  );
+
+  console.log(
+    `Notification response: ${responseText}`
+  );
+
+
   if (!response.ok) {
-
-    const body =
-      await response.text();
-
     throw new Error(
-      `Notification endpoint returned HTTP ${response.status}: ${body}`
+      `Notification endpoint failed: HTTP ${response.status} - ${responseText}`
     );
   }
 
 
   console.log(
-    "✅ Notification endpoint succeeded"
+    "Notification endpoint accepted the request."
   );
+
+  console.log(
+    "--------------------------------"
+  );
+
+  return true;
 }
 
 
 /**
- * Save notice to D1.
+ * Save successfully sent notice to D1.
  */
 async function saveNotice(env, notice) {
-
   await env.DB
     .prepare(`
       INSERT INTO notices
@@ -332,44 +365,35 @@ async function saveNotice(env, notice) {
       notice.date
     )
     .run();
+
+  console.log(
+    `Saved to D1: ${notice.title}`
+  );
 }
 
 
 /**
- * Main checker.
+ * Run complete check.
  */
 async function checkNests(env) {
-
   const today = getToday();
 
-
-  console.log(
-    "================================"
-  );
-
-  console.log(
-    `NESTS CHECK: ${today}`
-  );
-
-  console.log(
-    "================================"
-  );
+  console.log("");
+  console.log("================================");
+  console.log("NESTS NOTICE MONITOR");
+  console.log(`Today: ${today}`);
+  console.log("================================");
 
 
   /*
-   * Download page.
+   * Fetch NESTS.
    */
   const html =
     await fetchNests();
 
 
-  console.log(
-    `Downloaded ${html.length} bytes`
-  );
-
-
   /*
-   * Extract today's notices.
+   * Parse today's notices.
    */
   const notices =
     extractTodaysNotices(
@@ -379,7 +403,7 @@ async function checkNests(env) {
 
 
   console.log(
-    `Found ${notices.length} notice(s) for ${today}`
+    `Today's notices found: ${notices.length}`
   );
 
 
@@ -389,17 +413,13 @@ async function checkNests(env) {
 
 
   /*
-   * Process notices.
+   * Process every today's notice.
    */
   for (const notice of notices) {
 
     console.log("");
     console.log(
-      `Title: ${notice.title}`
-    );
-
-    console.log(
-      `URL: ${notice.url}`
+      `Processing: ${notice.title}`
     );
 
 
@@ -414,9 +434,8 @@ async function checkNests(env) {
 
 
     if (alreadySent) {
-
       console.log(
-        "⏭️ Already sent - skipping"
+        "Already sent. Skipping."
       );
 
       skipped++;
@@ -430,14 +449,17 @@ async function checkNests(env) {
      */
     try {
 
+      /*
+       * Send notification FIRST.
+       */
       await sendNotification(
         notice
       );
 
 
       /*
-       * Save only after notification
-       * succeeds.
+       * Only save to D1 after
+       * notification succeeds.
        */
       await saveNotice(
         env,
@@ -445,21 +467,32 @@ async function checkNests(env) {
       );
 
 
-      console.log(
-        "✅ Notice saved to D1"
-      );
-
-
       sent++;
+
+      console.log(
+        "SUCCESS: Notice sent and saved."
+      );
 
     } catch (error) {
 
+      failed++;
+
       console.error(
-        "❌ Failed to notify:",
-        error
+        "FAILED:",
+        error instanceof Error
+          ? error.message
+          : String(error)
       );
 
-      failed++;
+      /*
+       * IMPORTANT:
+       *
+       * We do NOT save the notice to D1
+       * if notification failed.
+       *
+       * Therefore the next cron run can
+       * retry it.
+       */
     }
   }
 
@@ -480,8 +513,17 @@ async function checkNests(env) {
   };
 
 
+  console.log("");
+  console.log(
+    "FINAL RESULT:"
+  );
+
   console.log(
     JSON.stringify(result)
+  );
+
+  console.log(
+    "================================"
   );
 
 
@@ -508,7 +550,9 @@ export default {
 
 
     /*
-     * Manual check.
+     * Manual check endpoint:
+     *
+     * /check
      */
     if (url.pathname === "/check") {
 
@@ -525,7 +569,7 @@ export default {
       } catch (error) {
 
         console.error(
-          "Check failed:",
+          "CHECK ERROR:",
           error
         );
 
@@ -549,7 +593,9 @@ export default {
 
 
     /*
-     * Health check.
+     * Health endpoint:
+     *
+     * /
      */
     if (url.pathname === "/") {
 
@@ -560,11 +606,11 @@ export default {
         status:
           "running",
 
-        timezone:
-          TIME_ZONE,
-
         today:
           getToday(),
+
+        timezone:
+          TIME_ZONE,
 
         source:
           NESTS_URL,
@@ -585,7 +631,7 @@ export default {
 
 
   /**
-   * Cron Trigger.
+   * Cloudflare Cron Trigger.
    */
   async scheduled(
     event,
@@ -593,11 +639,16 @@ export default {
     ctx
   ) {
 
+    console.log(
+      "Cron triggered."
+    );
+
+
     ctx.waitUntil(
       checkNests(env)
         .catch(error => {
           console.error(
-            "Scheduled check failed:",
+            "CRON ERROR:",
             error
           );
         })
