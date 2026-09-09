@@ -26,6 +26,12 @@
       "database_id": "108ec22d-f48d-41dc-b101-0f165783e58f"
     }
   ],
+  "services": [
+    {
+      "binding": "CONTACT",
+      "service": "contact"
+    }
+  ],
   "triggers": {
     "crons": [
       "*/5 * * * *"
