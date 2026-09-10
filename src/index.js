@@ -562,13 +562,6 @@ async function checkNests(env) {
    WORKER
    ========================================================= */
 
-export {
-  getToday,
-  cleanText,
-  getNodeText,
-  extractTodaysNotices
-};
-
 export default {
 
   async fetch(
