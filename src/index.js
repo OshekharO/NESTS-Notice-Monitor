@@ -109,25 +109,28 @@ function extractTodaysNotices(html, today) {
   const notices = [];
 
   $("tr").each((index, element) => {
-    const row = $(element);
-
-    const cells = row.find("td");
-
-    if (cells.length === 0) {
+    const children = element.children;
+    if (!children || children.length === 0) {
       return;
     }
 
-    /*
-     * Date is the last <td>.
-     * ⚡ Bolt Optimization: Use cells.eq(cells.length - 1) instead of cells.last()
-     * to avoid creating an extra Cheerio selection wrapper.
-     */
-    const date = cleanText(
-      cells.eq(cells.length - 1).text()
-    );
+    let lastTd = null;
+    for (let i = children.length - 1; i >= 0; i--) {
+      const child = children[i];
+      if (child.type === "tag" && child.name === "td") {
+        lastTd = child;
+        break;
+      }
+    }
+
+    if (!lastTd) {
+      return;
+    }
+
+    const date = cleanText($(lastTd).text());
 
     /*
-     * Only today's notices.
+     * Only today's notices. Early return avoids querying for anchors on older rows.
      */
     if (date !== today) {
       return;
@@ -136,8 +139,7 @@ function extractTodaysNotices(html, today) {
     /*
      * First anchor in the row.
      */
-    const link =
-      row.find("a").first();
+    const link = $(element).find("a").first();
 
     if (!link.length) {
       return;
@@ -191,10 +193,6 @@ function extractTodaysNotices(html, today) {
 
 /* =========================================================
    D1 - CHECK WHICH NOTICES WERE ALREADY SENT (BATCHED)
-   =========================================================
-   ⚡ Bolt Optimization: Batch D1 database lookup into a single query
-   instead of running N queries in a loop. Reduces database latency
-   from O(N) round-trips to O(1) round-trip.
    ========================================================= */
 
 async function getAlreadySentUrls(env, urls) {
