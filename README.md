@@ -29,8 +29,9 @@ NESTS-Notice-Monitor is a serverless application that periodically scrapes the N
 ## How It Works
 
 1. The Worker runs on a scheduled cron trigger (`*/5 * * * *`).
-2. It fetches the NESTS notice page:  
-   `https://nests.tribal.gov.in/show_content.php?lang=1&level=0&ls_id=15&lid=13`
+2. It concurrently fetches NESTS notice pages:
+   - `https://nests.tribal.gov.in/show_content.php?lang=1&level=0&ls_id=15&lid=13`
+   - `https://nests.tribal.gov.in/show_content.php?lang=1&level=1&ls_id=949&lid=550`
 3. Using Cheerio, it parses the HTML and extracts notices with **today's date**.
 4. For each notice, it checks D1 to see if it has already been sent.
 5. If not sent, it dispatches a notification through the Telegram‑Form‑Worker service binding (`env.CONTACT.fetch()`).
@@ -157,7 +158,10 @@ Returns service metadata:
     "status": "running",
     "today": "09 Sep 2026",
     "timezone": "Asia/Kolkata",
-    "source": "https://nests.tribal.gov.in/show_content.php?lang=1&level=0&ls_id=15&lid=13",
+    "sources": [
+        "https://nests.tribal.gov.in/show_content.php?lang=1&level=0&ls_id=15&lid=13",
+        "https://nests.tribal.gov.in/show_content.php?lang=1&level=1&ls_id=949&lid=550"
+    ],
     "check": "/check",
     "cron": "Every 5 minutes"
 }
@@ -211,7 +215,7 @@ These are set in the Telegram‑Form‑Worker deployment:
 
 | Variable | Description |
 |----------|-------------|
-| `NESTS_URL` | NESTS notice page URL |
+| `NESTS_URLS` | Array of NESTS notice page URLs to monitor |
 | `TIME_ZONE` | Time zone for date calculations (IST) |
 
 ## Database Schema
